@@ -409,7 +409,7 @@ impl Chromosome for SwapPath {
         slice_crossover(&mut self.swaps, &mut other.swaps, start, end);
     }
 
-    fn point_mutation(&mut self, index: usize, _rng: &mut impl Rng) {
-        self.swaps[index] = self.swaps[index ^ 1];
+    fn point_mutation(&mut self, index: usize, rng: &mut impl Rng) {
+        self.swaps[index] = rng.gen::<usize>() % self.map_size;
     }
 }

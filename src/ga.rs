@@ -7,7 +7,8 @@ pub struct Settings {
     pub replace_percent: f32,
     pub elitist_percent: f32,
     pub crossover_prob: f32,
-    pub mutate_prob: f32
+    pub mutate_prob: f32,
+    pub selection_noise: f32
 }
 
 pub trait Chromosome: Path + Clone {
@@ -153,7 +154,8 @@ impl RouletteWheelSelection {
             // Get the two parents
             let mut selections = [0usize; 2];
             'selector: for i in 0..2 {
-                let mut random = rng.gen::<f32>();
+                let noise = settings.selection_noise * (rng.gen::<f32>() * 2.0 - 1.0);
+                let mut random = rng.gen::<f32>() + noise;
                 for j in 0..n {
                     if random < losses[j] && (i == 0 || selections[0] != j) {
                         selections[i] = j;

@@ -1,6 +1,7 @@
 use crate::map::{Map, Path, Point};
 use std::cell::Cell;
 use std::cmp;
+use std::fmt::{self, Debug, Formatter};
 use std::ops::Deref;
 
 pub struct Counter<'a>(Option<&'a mut usize>);
@@ -111,6 +112,7 @@ pub fn branch_and_bound<'a, C: Into<Counter<'a>>>(map: &Map, counter: C) -> f32 
     min_dist
 }
 
+
 fn branch_and_bound_internal(
     mut points: PathDataIter<'_>,
     last: &Point,
@@ -169,21 +171,41 @@ impl PathData {
     }
 
     #[inline]
-    fn visit(&self, index: usize) -> Option<VisitedPoint<'_>> {
-        match self.points.get(index) {
-            Some((point, _)) => {
-                // Infallible: visited.len() == points.len()
-                unsafe  {
-                    self.visited.get_unchecked(index).set(true);
-                }
+    fn lower_bound(&self, accumulated: f32) -> f32 {
+        // The lower bound is calculated by summing the remaining nearest-neighbor distances (excluding one)
+        // and adding that to the current accumulated distance.
 
-                Some(VisitedPoint{
-                    value: point.clone(),
-                    source: self,
-                    index
-                })
-            },
-            None => None
+        accumulated + self.visited.iter()
+            .enumerate()
+            .filter(|(_, flag)| !flag.get())
+            .skip(1)
+            // Infallible: visited.len() == points.len()
+            .map(|(index, _)| unsafe { self.points.get_unchecked(index).1 })
+            .sum::<f32>()
+    }
+
+    #[inline]
+    fn visit_next(&self, index: &mut usize) -> Option<VisitedPoint<'_>> {
+        while self.visited.get(*index).map(Cell::get).unwrap_or(false) {
+            *index += 1;
+        }
+
+        if *index == self.points.len() {
+            return None;
+        }
+
+        // Index checked beforehand
+        unsafe  {
+            self.visited.get_unchecked(*index).set(true);
+
+            let ret = Some(VisitedPoint{
+                value: self.points.get_unchecked(*index).0.clone(),
+                source: self,
+                index: *index
+            });
+
+            *index += 1;
+            ret
         }
     }
 }
@@ -203,16 +225,7 @@ impl<'a> PathDataIter<'a> {
 
     #[inline]
     fn lower_bound(&self, accumulated: f32) -> f32 {
-        // The lower bound is calculated by summing the remaining nearest-neighbor distances (excluding one)
-        // and adding that to the current accumulated distance.
-
-        accumulated + self.path_data.visited.iter()
-            .enumerate()
-            .filter(|(_, flag)| !flag.get())
-            .skip(1)
-            // Infallible: visited.len() == points.len()
-            .map(|(index, _)| unsafe { self.path_data.points.get_unchecked(index).1 })
-            .sum::<f32>()
+        self.path_data.lower_bound(accumulated)
     }
 
     const fn clone_reset(&self) -> Self {
@@ -225,13 +238,7 @@ impl<'a> Iterator for PathDataIter<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        while self.path_data.visited.get(self.index).map(Cell::get).unwrap_or(false) {
-            self.index += 1;
-        }
-
-        let ret = self.path_data.visit(self.index);
-        self.index += 1;
-        ret
+        self.path_data.visit_next(&mut self.index)
     }
 }
 
@@ -257,5 +264,11 @@ impl<'a> Drop for VisitedPoint<'a> {
         unsafe {
             self.source.visited.get_unchecked(self.index).set(false);
         }
+    }
+}
+
+impl<'a> Debug for VisitedPoint<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.value, f)
     }
 }

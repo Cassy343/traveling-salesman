@@ -13,7 +13,7 @@ use map::{
     RemovalIndex,
     SwapPath
 };
-use solve::{brute_force, nearest_neighbor, branch_and_bound};
+use solve::*;
 use std::f32::consts;
 use std::fmt::Debug;
 use std::time::SystemTime;
@@ -27,10 +27,10 @@ const SETTINGS: Settings = Settings {
 };
 
 fn main() {
-    let map = Map::new(10);
+    let map = Map::new(15);
     let start = SystemTime::now();
     println!("{}", branch_and_bound(&map, None));
-    println!("Elapsed: {}μs", start.elapsed().unwrap().as_micros());
+    println!("Time: {}", start.elapsed().unwrap().as_micros());
 }
 
 fn average(iters: u32) -> (u32, u32) {

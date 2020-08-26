@@ -91,8 +91,9 @@ impl Map {
         self.points.len()
     }
 
-    pub fn get(&self, index: usize) -> Option<&Point> {
-        self.points.get(index)
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Point> {
+        self.points.get(index).cloned()
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Point> {
@@ -145,7 +146,7 @@ impl<T: AsRef<[usize]>> Path for T {
     fn evaluate(&self, map: &Map) -> f32 {
         self.as_ref().windows(2)
             .flat_map(|segment| Some((map.get(segment[0])?, map.get(segment[1])?)))
-            .map(|(a, b)| a.dist(b))
+            .map(|(a, b)| a.dist(&b))
             .sum::<f32>()
     }
 

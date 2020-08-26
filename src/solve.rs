@@ -1,7 +1,32 @@
-use crate::map::{Map, Path};
+use crate::map::{Map, Path, Point};
+use std::cell::Cell;
 use std::cmp;
+use std::ops::Deref;
 
-pub fn brute_force(map: &Map) -> (Vec<usize>, f32) {
+pub struct Counter<'a>(Option<&'a mut usize>);
+
+impl<'a> Counter<'a> {
+    pub fn increment(&mut self) {
+        if let Some(inner) = self.0.as_deref_mut() {
+            *inner += 1;
+        }
+    }
+}
+
+impl<'a> From<Option<&'a mut usize>> for Counter<'a> {
+    fn from(x: Option<&'a mut usize>) -> Self {
+        Counter(x)
+    }
+}
+
+impl<'a> From<&'a mut usize> for Counter<'a> {
+    fn from(x: &'a mut usize) -> Self {
+        Counter(Some(x))
+    }
+}
+
+pub fn brute_force<'a, C: Into<Counter<'a>>>(map: &Map, counter: C) -> (Vec<usize>, f32) {
+    let mut counter = counter.into();
     let mut current = vec![0usize; map.size()];
     current.iter_mut().enumerate().for_each(|(index, ele)| *ele = index);
     let mut solution = current.clone();
@@ -10,6 +35,8 @@ pub fn brute_force(map: &Map) -> (Vec<usize>, f32) {
     let max = map.size() - 1;
     let mut increase: usize = 0;
     while increase != max {
+        counter.increment();
+
         if increase == 0 {
             current.swap(increase, increase + 1);
             increase += 1;
@@ -66,4 +93,169 @@ pub fn nearest_neighbor(map: &Map) -> f32 {
         point = points.remove(index);
     }
     total
+}
+
+pub fn branch_and_bound<'a, C: Into<Counter<'a>>>(map: &Map, counter: C) -> f32 {
+    let mut counter = counter.into();
+    let data = PathData::new(map);
+    let mut min_dist = nearest_neighbor(map);
+
+    let mut iter = data.iter();
+    while let Some(point) = iter.next() {
+        branch_and_bound_internal(data.iter(), &point, 0f32, &mut min_dist, &mut counter);
+
+        // Explicit for clarity
+        drop(point);
+    } 
+
+    min_dist
+}
+
+fn branch_and_bound_internal(
+    mut points: PathDataIter<'_>,
+    last: &Point,
+    accumulated: f32,
+    min_dist: &mut f32,
+    counter: &mut Counter<'_>
+) {
+    let mut count = 0;
+    while let Some(point) = points.next() {
+        count += 1;
+        counter.increment();
+        
+        let new_accumulated = accumulated + point.dist(last);
+        if points.lower_bound(new_accumulated) < *min_dist {
+            branch_and_bound_internal(points.clone_reset(), &point, new_accumulated, min_dist, counter);
+        }
+
+        // Explicit for clarity
+        drop(point);
+    }
+
+    if count == 0 && accumulated < *min_dist {
+        *min_dist = accumulated;
+    }
+}
+
+struct PathData {
+    points: Box<[(Point, f32)]>,
+    visited: Box<[Cell<bool>]>
+}
+
+impl PathData {
+    fn new(map: &Map) -> Self {
+        // Get a list of the points, each with its distance to its nearest neighbor
+        let mut points = vec![(Point::new(), 0f32); map.size()].into_boxed_slice();
+        for i in 0..map.size() {
+            let point = map.get(i).unwrap().clone();
+            let mut min = f32::MAX;
+            for j in 0..map.size() {
+                let dist = map.get(j).map(|p| p.dist(&point)).unwrap_or(f32::MAX);
+                if i != j && dist < min {
+                    min = dist;
+                }
+            }
+            points[i] = (point, min);
+        }
+
+        PathData {
+            points,
+            visited: vec![Cell::new(false); map.size()].into_boxed_slice()
+        }
+    }
+
+    const fn iter(&self) -> PathDataIter<'_> {
+        PathDataIter::new(self)
+    }
+
+    #[inline]
+    fn visit(&self, index: usize) -> Option<VisitedPoint<'_>> {
+        match self.points.get(index) {
+            Some((point, _)) => {
+                // Infallible: visited.len() == points.len()
+                unsafe  {
+                    self.visited.get_unchecked(index).set(true);
+                }
+
+                Some(VisitedPoint{
+                    value: point.clone(),
+                    source: self,
+                    index
+                })
+            },
+            None => None
+        }
+    }
+}
+
+struct PathDataIter<'a> {
+    path_data: &'a PathData,
+    index: usize
+}
+
+impl<'a> PathDataIter<'a> {
+    const fn new(path_data: &'a PathData) -> Self {
+        PathDataIter {
+            path_data,
+            index: 0
+        }
+    }
+
+    #[inline]
+    fn lower_bound(&self, accumulated: f32) -> f32 {
+        // The lower bound is calculated by summing the remaining nearest-neighbor distances (excluding one)
+        // and adding that to the current accumulated distance.
+
+        accumulated + self.path_data.visited.iter()
+            .enumerate()
+            .filter(|(_, flag)| !flag.get())
+            .skip(1)
+            // Infallible: visited.len() == points.len()
+            .map(|(index, _)| unsafe { self.path_data.points.get_unchecked(index).1 })
+            .sum::<f32>()
+    }
+
+    const fn clone_reset(&self) -> Self {
+        Self::new(self.path_data)
+    }
+}
+
+impl<'a> Iterator for PathDataIter<'a> {
+    type Item = VisitedPoint<'a>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.path_data.visited.get(self.index).map(Cell::get).unwrap_or(false) {
+            self.index += 1;
+        }
+
+        let ret = self.path_data.visit(self.index);
+        self.index += 1;
+        ret
+    }
+}
+
+struct VisitedPoint<'a> {
+    value: Point,
+    source: &'a PathData,
+    index: usize
+}
+
+impl<'a> Deref for VisitedPoint<'a> {
+    type Target = Point;
+
+    #[inline]
+    fn deref(&self) -> &Point {
+        &self.value
+    }
+}
+
+impl<'a> Drop for VisitedPoint<'a> {
+    #[inline]
+    fn drop(&mut self) {
+        // Infallible: in order for this type to be constructed the index must be valid
+        unsafe {
+            self.source.visited.get_unchecked(self.index).set(false);
+        }
+    }
 }

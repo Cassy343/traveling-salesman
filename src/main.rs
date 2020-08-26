@@ -13,7 +13,7 @@ use map::{
     RemovalIndex,
     SwapPath
 };
-use solve::{brute_force, nearest_neighbor};
+use solve::{brute_force, nearest_neighbor, branch_and_bound};
 use std::f32::consts;
 use std::fmt::Debug;
 use std::time::SystemTime;
@@ -27,18 +27,10 @@ const SETTINGS: Settings = Settings {
 };
 
 fn main() {
-    let mut points = Vec::new();
-    let n = 75;
-    for i in 0..n {
-        let theta = (i as f32 / n as f32) * 2.0 * consts::PI;
-        points.push(Point::polar(1.0, theta));
-    }
-
-    let map = Map::from_points(points);
-    let mut population: Vec<RandomKeyPath> = Vec::with_capacity(5);
-    population.resize_with(population.capacity(), || RandomKeyPath::new(&map));
-    let recomb = Uniform::new();
-    println!("Iters: {}", run(&map, nearest_neighbor(&map), population, &recomb, true));
+    let map = Map::new(10);
+    let start = SystemTime::now();
+    println!("{}", branch_and_bound(&map, None));
+    println!("Elapsed: {}μs", start.elapsed().unwrap().as_micros());
 }
 
 fn average(iters: u32) -> (u32, u32) {
@@ -48,7 +40,7 @@ fn average(iters: u32) -> (u32, u32) {
     let mut total_without_fix = 0u128;
     for i in 0..iters {
         let map = Map::new(10);
-        let target = brute_force(&map).1;
+        let target = brute_force(&map, None).1;
 
         let mut population: Vec<RandomKeyPath> = Vec::with_capacity(50);
         population.resize_with(population.capacity(), || RandomKeyPath::new(&map));
